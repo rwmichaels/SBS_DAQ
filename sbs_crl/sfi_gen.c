@@ -2,6 +2,15 @@
 
 int trig_addr=0x080000;  /* this is the thumbwheel switch on the TI module */
 
+/* need to load the fb_diag_cl.o lib for these */
+extern int isAdc1881(int slot);
+extern int isAdc1877(int slot);
+extern int isAdc1875(int slot);
+extern int fb_map();
+
+int topAdc=0;
+int bottomAdc=0;
+int readout_ti;
 
 
 /* # 1 "sfi_gen.c" */
@@ -1252,9 +1261,10 @@ int blockLevel=1;
 int nb = 0;
 unsigned int *tiData= ((void *) 0) ;
 unsigned int tibready;
-int adcslots[4 ];
-int modslots[4 ];
-int csr0[4 ];
+int nmodules = 0;
+int adcslots[26 ];
+int modslots[26 ];
+int csr0[26 ];
 static int debug=1;
 static void __download()
 {
@@ -1279,13 +1289,41 @@ bigendian_out = 0;
      InitSFI(laddr);
   }
  } 
+ {
+   printf("Map of Fastbus Modules \n");
+   fb_map();
+   kk=0;
+/* FIXME
+  These arrays are hardly used; need to reimplement extra-hit recovery
+  Need to add TDCs */
+   nmodules=0;
+   for (jj=0; jj<26; jj++) {
+     if (isAdc1881(jj)) {
+       adcslots[nmodules]=jj;
+       modslots[nmodules]=jj;
+       csr0[nmodules]=0x400;
+       nmodules++;
+     }
+   }
+   scan_mask = 0;
+   topAdc=-1;
+   bottomAdc=26;
+   for (jj=0; jj< nmodules ; jj++) {
+      scan_mask |= (1<<modslots[jj]);
+      if (adcslots[jj]>topAdc) topAdc=adcslots[jj];
+      if (adcslots[jj]<bottomAdc) bottomAdc=adcslots[jj];
+   }
+   printf ("constructed Crate Scan mask = %x\n",scan_mask);  
+   printf ("topAdc %d   bottomAdc %d\n",topAdc,bottomAdc);
+ }
+
 { 
 {
   tiSetFiberLatencyOffset_preInit(0x40); 
   tiSetCrateID_preInit(0x1);  
   tiInit(trig_addr ,1 ,0);
   tiDisableBusError();
-  if(1 ==0)  
+  if(readout_ti==0)  
     {
       tiDisableDataReadout();
       tiDisableA32();
@@ -1298,30 +1336,13 @@ bigendian_out = 0;
   tiSetEventFormat(2);
  }
  } 
-{ 
-{
-  if (4 >0) {
-    kk=0;
-    for(jj= 15 ;jj<= 18 ;jj++) {
-       adcslots[kk]=jj;
-       modslots[kk]=jj;
-       csr0[kk]=0x400;
-       kk++;
-     }
-  }
-  scan_mask = 0;
-  for (jj=0; jj< 4 ; jj++)
-     scan_mask |= (1<<modslots[jj]);
-  printf ("Crate Scan mask = %x\n",scan_mask);  
-}
- } 
     daLogMsg("INFO","User Download Executed");
-  }   
+}
     return;
    fooy: 
     sfi_error_decode(0) ;
     return ;
-}       
+}      
 static void __prestart()
 {
 { dispatch_busy = 0; bzero((char *) evMasks, sizeof(evMasks)); bzero((char *) syncTRtns, 
@@ -1330,6 +1351,7 @@ wrapperGenerator = 0; theEvMask = 0; currEvMask = 0; trigId = 1; poolEmpty = 0; 
 input_event__ = (DANODE *) 0; } ;     *(rol->nevents) = 0;
   {   
 unsigned long pedsuppress;
+ int kk;
     daLogMsg("INFO","Entering User Prestart");
     { GEN_handlers =0;GEN_isAsync = 0;GENflag = 0;} ;
 { void titrig ();void titrig_done (); doneRtns[trigId] = (FUNCPTR) ( titrig_done ) ; 
@@ -1337,15 +1359,12 @@ trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trig
 \n", trigId ); GEN_handlers = ( trigId );GEN_isAsync = 1;gentriglink( 1 ,GEN_int_handler);} 
 ;trigId++;} ;     {evMasks[ 1 ] |= (1<<( GEN_handlers ));} ;
     fb_init_1(0);
-    padr   = 15 ; 
-    fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
-    padr   = 16 ; 
-    fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
-    padr   = 17 ; 
-    fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
-    padr   = 18 ; 
-    fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
-  sfi_error_decode(0);
+    /* reset ADCs */
+    for (kk==0; kk<nmodules; kk++) {
+      padr   = adcslots[kk];
+      fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
+    }  
+    sfi_error_decode(0);
 { 
     nb =0;
     pedsuppress = 0;  
@@ -1355,63 +1374,43 @@ trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trig
       set_thresholds();
     }
     sfi_error_decode(0);
- } 
-    padr   = 18 ; 
-    fb_fwc_1(padr,0,0x00000904,1,1,0,1,0,1,1);
-if(( pedsuppress == 1) ) {
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x4000008B,1,1,1,0,0,1,1);
-}
-else{
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x0000008B,1,1,1,0,0,1,1);
-} 
+ }
+
+/* program the modules.  top slot and bottom are book-ends to 
+  form a multiblock.  This means there should be at least 3 modules. */ 
+
+ for (kk=0; kk<nmodules; kk++) { 
+
+   padr   = adcslots[kk];
+
+   if (padr == topAdc) { 
+      printf("top slot %d  %d  program \n",kk,padr);
+      fb_fwc_1(padr,0,0x00000904,1,1,0,1,0,1,1);
+      goto done1;
+   }     
+   if (padr == bottomAdc) {
+      printf("bottom slot %d  %d  program \n",kk,padr);
+      fb_fwc_1(padr,0,0x00001904,1,1,0,1,0,1,1);
+      goto done1;
+   }
+   printf("middle slot %d  %d  program \n",kk,padr);
+   fb_fwc_1(padr,0,0x00001104,1,1,0,1,0,1,1);
+   
+done1:
+
+   if ( pedsuppress == 1)  {
+       sadr = 1 ;
+       fb_fwc_1(0,sadr,0x4000008B,1,1,1,0,0,1,1);
+    } else {
+       sadr = 1 ;
+       fb_fwc_1(0,sadr,0x0000008B,1,1,1,0,0,1,1);
+    }
     sadr = 7 ;
     fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
     fprel(); 
-  sfi_error_decode(0);
-    padr   = 17 ; 
-    fb_fwc_1(padr,0,0x00001904,1,1,0,1,0,1,1);
-if(( pedsuppress == 1) ) {
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x4000008B,1,1,1,0,0,1,1);
-}
-else{
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x0000008B,1,1,1,0,0,1,1);
-} 
-    sadr = 7 ;
-    fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
-    fprel(); 
-  sfi_error_decode(0);
-    padr   = 16 ; 
-    fb_fwc_1(padr,0,0x00001904,1,1,0,1,0,1,1);
-if(( pedsuppress == 1) ) {
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x4000008B,1,1,1,0,0,1,1);
-}
-else{
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x0000008B,1,1,1,0,0,1,1);
-} 
-    sadr = 7 ;
-    fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
-    fprel(); 
-  sfi_error_decode(0);
-    padr   = 15 ; 
-    fb_fwc_1(padr,0,0x00001104,1,1,0,1,0,1,1);
-if(( pedsuppress == 1) ) {
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x4000008B,1,1,1,0,0,1,1);
-}
-else{
-    sadr = 1 ;
-    fb_fwc_1(0,sadr,0x0000008B,1,1,1,0,0,1,1);
-} 
-    sadr = 7 ;
-    fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
-    fprel(); 
-  sfi_error_decode(0);
+    sfi_error_decode(0);
+ }
+
     daLogMsg("INFO","User Prestart Executed");
   }   
 if (__the_event__) rol->dabufp = ((void *) 0) ; if (__the_event__) { if (rol->output) { {if(! ( 
@@ -1582,7 +1581,7 @@ syncFlag;   *sfi.sequencerEnable = 0;
   rol->dabufp = (long *) 0;
 { 
 {
-  if(1 ==1)
+  if(readout_ti==1)
     {
       dCnt = tiReadBlock(tiData,50,0);
       if(dCnt<=0)
@@ -1613,7 +1612,7 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 (input_event__->nevent));	} else {	*(++(rol->dabufp)) = (syncFlag<<24) | (( 1 ) << 16) | (( 0x10 ) << 8) | (0xff & 
 *(rol->nevents));	}	((rol->dabufp))++;} ; { 
 {
-  if(1 ==1)
+  if(readout_ti ==1)
     {
 {	long *StartOfBank; StartOfBank = (rol->dabufp); *(++(rol->dabufp)) = ((( 4 ) << 16) | ( 0x01 ) 
 << 8) | ( 0 );	((rol->dabufp))++; ;       if(dCnt<=0)
@@ -1652,7 +1651,7 @@ if (1 ==numBranchdata ) {
 << 8) | ( 0 );	((rol->dabufp))++; ; if(( ii <  50) ) {
   fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
     {*(rol->dabufp)++ = ( 0xda000011 );} ; 
-    padr   = 18  ;
+    padr   = topAdc  ;
     fpbr(padr,520); 
     {*(rol->dabufp)++ = ( ii );} ; 
     {*(rol->dabufp)++ = ( 0xda000022 );} ; 
