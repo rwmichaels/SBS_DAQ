@@ -83,11 +83,11 @@ int isAdc1881(int slot) {
   return map_adc[slot];
 }
 
-int isAdc1877(int slot) {
+int isTdc1877(int slot) {
   return (map_tdc77[slot] || map_tdc77S[slot]); 
 }
 
-int isAdc1875(int slot) {
+int isTdc1875(int slot) {
   return (map_tdc72[slot] || map_tdc75[slot]); 
 }
 
