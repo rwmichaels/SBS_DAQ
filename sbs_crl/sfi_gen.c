@@ -1,6 +1,7 @@
 /* globals */
 
-  int trig_addr=0x080000;  
+int trig_addr=0x080000;  /* this is the thumbwheel switch on the TI module */
+
 
 
 /* # 1 "sfi_gen.c" */
