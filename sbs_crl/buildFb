@@ -1,0 +1,8 @@
+#!/bin/csh -f
+
+set VX_INCLUDE=$CODA/common/include
+
+set compiler_flag="$3 $4 $5 $6 $7 $8 $9 $10 $11 $12 $13 $14 $15 $16 $17 $18 $19 $20 $21 $22 $23 $24 $25"
+
+ccppc -fno-builtin -D_GNU_TOOL -DVXWORKS -DVXWORKSPPC -mcpu=604 -nostdinc -mlongcall -fno-for-scope -fno-writable-strings -fvolatile -DDAYTIME=\""`date`"\" -O -w -Wall -c -DCPU=PPC604 -I$VX_INCLUDE -I. $compiler_flag sfi_gen.c
+
