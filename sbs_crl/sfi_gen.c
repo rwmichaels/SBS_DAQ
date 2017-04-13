@@ -1,16 +1,22 @@
 /* globals */
 
+/* parameters that configure the crate */
+
 int trig_addr=0x080000;  /* this is the thumbwheel switch on the TI module */
+int readout_ti=1;
+int trig_mode=1;  
+int buffer_level=1;
+int branch_num=1;  
+unsigned long defaultAdcCsr1=0x0000008B;
 
 /* need to load the fb_diag_cl.o lib for these */
 extern int isAdc1881(int slot);
-extern int isAdc1877(int slot);
-extern int isAdc1875(int slot);
+extern int isTdc1877(int slot);
+extern int isTdc1875(int slot);
 extern int fb_map();
 
 int topAdc=0;
 int bottomAdc=0;
-int readout_ti;
 
 
 /* # 1 "sfi_gen.c" */
@@ -1148,6 +1154,29 @@ unsigned long thresholds[19 ][64 ];
 unsigned long readback_thresholds[19 ][64 ];
 unsigned long slots[19 ];
 int nmodules;
+void load_cratemap()
+{
+  char *fname;
+  int fd;
+  char s[256];
+  int imodule, subadd;
+  int slot;
+  nmodules=0;			 
+  fname = getstr("cmap");
+  fd = fopen(fname,"r");
+  if(!fd) {
+    printf("Failed to open cratemap file %s\n",fname);
+    return;
+  }
+  printf("Reading cratemap from file %s\n",fname); 
+  imodule=-1;
+  slot = -1;
+  subadd = 64 ;
+  while(fgets(s,255,fd)) {
+    printf("line %s \n",s);
+  }
+}
+
 void load_thresholds()
 {
   char *fname;
@@ -1263,6 +1292,7 @@ unsigned int *tiData= ((void *) 0) ;
 unsigned int tibready;
 int nmodules = 0;
 int adcslots[26 ];
+int tdcslots[26 ];
 int modslots[26 ];
 int csr0[26 ];
 static int debug=1;
@@ -1293,6 +1323,9 @@ bigendian_out = 0;
    printf("Map of Fastbus Modules \n");
    fb_map();
    kk=0;
+
+   load_cratemap();
+
 /* FIXME
   These arrays are hardly used; need to reimplement extra-hit recovery
   Need to add TDCs */
@@ -1304,10 +1337,13 @@ bigendian_out = 0;
        csr0[nmodules]=0x400;
        nmodules++;
      }
+     if (isTdc1877(jj)) {
+       /* do something here */
+     }
    }
    scan_mask = 0;
    topAdc=-1;
-   bottomAdc=26;
+   bottomAdc=27;
    for (jj=0; jj< nmodules ; jj++) {
       scan_mask |= (1<<modslots[jj]);
       if (adcslots[jj]>topAdc) topAdc=adcslots[jj];
@@ -1321,14 +1357,14 @@ bigendian_out = 0;
 {
   tiSetFiberLatencyOffset_preInit(0x40); 
   tiSetCrateID_preInit(0x1);  
-  tiInit(trig_addr ,1 ,0);
+  tiInit(trig_addr ,trig_mode ,0);
   tiDisableBusError();
   if(readout_ti==0)  
     {
       tiDisableDataReadout();
       tiDisableA32();
     }
-  tiSetBlockBufferLevel(1 );
+  tiSetBlockBufferLevel(buffer_level );
   tiSetBusySource(0,1);
   tiSetTriggerSource(6 );
   tiStatus(0);
@@ -1351,6 +1387,7 @@ wrapperGenerator = 0; theEvMask = 0; currEvMask = 0; trigId = 1; poolEmpty = 0; 
 input_event__ = (DANODE *) 0; } ;     *(rol->nevents) = 0;
   {   
 unsigned long pedsuppress;
+unsigned long csrvalue;
  int kk;
     daLogMsg("INFO","Entering User Prestart");
     { GEN_handlers =0;GEN_isAsync = 0;GENflag = 0;} ;
@@ -1358,7 +1395,9 @@ unsigned long pedsuppress;
 trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trigId] = genttype ; {printf("linking async GEN trigger to id %d 
 \n", trigId ); GEN_handlers = ( trigId );GEN_isAsync = 1;gentriglink( 1 ,GEN_int_handler);} 
 ;trigId++;} ;     {evMasks[ 1 ] |= (1<<( GEN_handlers ));} ;
+
     fb_init_1(0);
+
     /* reset ADCs */
     for (kk==0; kk<nmodules; kk++) {
       padr   = adcslots[kk];
@@ -1376,39 +1415,30 @@ trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trig
     sfi_error_decode(0);
  }
 
-/* program the modules.  top slot and bottom are book-ends to 
+/* program the ADC modules.  top slot and bottom are book-ends to 
   form a multiblock.  This means there should be at least 3 modules. */ 
 
+ printf("programming ADCs.  Num of modules = %d\n",nmodules);
  for (kk=0; kk<nmodules; kk++) { 
 
    padr   = adcslots[kk];
+   csrvalue = 0x00001904;  
+   if (padr == topAdc) csrvalue = 0x00000904;
+   if (padr == bottomAdc) csrvalue = 0x00001104;
 
-   if (padr == topAdc) { 
-      printf("top slot %d  %d  program \n",kk,padr);
-      fb_fwc_1(padr,0,0x00000904,1,1,0,1,0,1,1);
-      goto done1;
-   }     
-   if (padr == bottomAdc) {
-      printf("bottom slot %d  %d  program \n",kk,padr);
-      fb_fwc_1(padr,0,0x00001904,1,1,0,1,0,1,1);
-      goto done1;
-   }
-   printf("middle slot %d  %d  program \n",kk,padr);
-   fb_fwc_1(padr,0,0x00001104,1,1,0,1,0,1,1);
+   printf("slot %d  %d   csr0 0x%x \n",kk,padr,csrvalue);
+   fb_fwc_1(padr,0,csrvalue,1,1,0,1,0,1,1);
    
-done1:
+   sadr = 1;
+   csrvalue = defaultAdcCsr1;
+   if (pedsuppress == 1) csrvalue |= 0x40000000;
+   printf("csr1 0x%x \n",csrvalue);
+   fb_fwc_1(0,sadr,csrvalue,1,1,1,0,0,1,1);
 
-   if ( pedsuppress == 1)  {
-       sadr = 1 ;
-       fb_fwc_1(0,sadr,0x4000008B,1,1,1,0,0,1,1);
-    } else {
-       sadr = 1 ;
-       fb_fwc_1(0,sadr,0x0000008B,1,1,1,0,0,1,1);
-    }
-    sadr = 7 ;
-    fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
-    fprel(); 
-    sfi_error_decode(0);
+   sadr = 7 ;
+   fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
+   fprel(); 
+   sfi_error_decode(0);
  }
 
     daLogMsg("INFO","User Prestart Executed");
@@ -1626,7 +1656,7 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 	     *rol->dabufp++ = tiData[ii];
            }
            *rol->dabufp++ = 0xb0b04444;
-           *rol->dabufp++ = 1 ;
+           *rol->dabufp++ = branch_num;
            *rol->dabufp++ = numBranchdata;
 	}
 *StartOfBank = (long) (((char *) (rol->dabufp)) - ((char *) StartOfBank));	if ((*StartOfBank 
@@ -1637,7 +1667,7 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
  } 
 { 
 ii=50;
-if (1 ==numBranchdata ) {
+if (branch_num==numBranchdata ) {
   ii=0;
   datascan = 0;
   while ((ii<50) && ((datascan&scan_mask) != scan_mask)) {
@@ -1658,7 +1688,7 @@ if (1 ==numBranchdata ) {
 { 
   datascan = 0;
   fbres = fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
-  if (fbres) logMsg("fbres = 0x%x\n",fbres,0,0,0,0,0);
+  if (fbres) logMsg("fbres = 0x%x scan_mask 0x%x datascan 0x%x\n",fbres,scan_mask,datascan,0,0,0);
   if ((datascan != 0) && (datascan&~scan_mask)) { 
 logMsg("Error: Read data but More data available after readout datascan = 0x%08x fbres = 
 0x%x\n",datascan,fbres,0,0,0,0);   }
