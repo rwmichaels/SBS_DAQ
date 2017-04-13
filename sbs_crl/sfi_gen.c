@@ -1,15 +1,38 @@
-/* globals */
+/* Generic CRL (actually C) code used for SBS Fastbus 
+   April, 2017.   Bob Michaels
+
+   The rules are:
+     1. Need >= 3 modules of each type (ADC1881 or TDC1877) 
+        (if you want only 1 module you should do something else)
+     2. The modules should be put in a block with no gap in
+        the slot number. E.g. slots 4,5,6,7 and not 4,5,7
+
+*/
+
+/* Global variables here */
 
 /* parameters that configure the crate */
 
-int trig_addr=0x080000;  /* this is the thumbwheel switch on the TI module */
+/* This is the thumbwheel switch on the TI module */
+int trig_addr=0x080000;  
+
 int readout_ti=1;
 int trig_mode=1;  
 int buffer_level=1;
 int branch_num=1;  
+
+/* These are parameters in the "maximum" line of CRL, specifically
+   arguments to 
+       rolp->pool  = partCreate(name, maxevsize  , maxbuff ,1);
+*/
+
+int maxevsize=8192;
+int maxbuff=256;
+
+/* Back plane gate: 8B.  Front panel: 81    */
 unsigned long defaultAdcCsr1=0x0000008B;
 
-/* need to load the fb_diag_cl.o lib for these */
+/* Need to load the fb_diag_cl.o library for these functions */
 extern int isAdc1881(int slot);
 extern int isTdc1877(int slot);
 extern int isTdc1875(int slot);
@@ -17,7 +40,8 @@ extern int fb_map();
 
 int topAdc=0;
 int bottomAdc=0;
-
+int topTdc=0;
+int bottomTdc=0;
 
 /* # 1 "sfi_gen.c" */
 /* # 1 "/site/coda/2.6.2/common/include/rol.h" 1 */
@@ -329,7 +353,7 @@ void sfi_gen__init (rolp)
 	  printf("Init - Initializing new rol structures for %s\n",rol_name__);
 	  strcpy(name, rolp->listName);
 	  strcat(name, ":pool");
-	  rolp->pool  = partCreate(name, 4096  , 512 ,1);
+	  rolp->pool  = partCreate(name, maxevsize  , maxbuff ,1);
 	  if (rolp->pool == 0) {
 	    rolp->inited = -1;
 	    break;
@@ -1331,6 +1355,11 @@ bigendian_out = 0;
   Need to add TDCs */
    nmodules=0;
    for (jj=0; jj<26; jj++) {
+      adcslots[jj] = -1;  /* init */
+      tdcslots[jj] = -1;
+      modslots[jj] = -1;
+   }
+   for (jj=0; jj<26; jj++) {
      if (isAdc1881(jj)) {
        adcslots[nmodules]=jj;
        modslots[nmodules]=jj;
@@ -1338,19 +1367,37 @@ bigendian_out = 0;
        nmodules++;
      }
      if (isTdc1877(jj)) {
-       /* do something here */
+       tdcslots[nmodules]=jj;
+       modslots[nmodules]=jj;
+       csr0[nmodules]=0x400;
+       nmodules++;
      }
    }
    scan_mask = 0;
    topAdc=-1;
    bottomAdc=27;
+   topTdc=-1;
+   bottomTdc=27;
    for (jj=0; jj< nmodules ; jj++) {
-      scan_mask |= (1<<modslots[jj]);
-      if (adcslots[jj]>topAdc) topAdc=adcslots[jj];
-      if (adcslots[jj]<bottomAdc) bottomAdc=adcslots[jj];
+     if (modslots[jj] >= 0) {
+       scan_mask |= (1<<modslots[jj]);
+       if (adcslots[jj]>=0&&adcslots[jj]>topAdc) topAdc=adcslots[jj];
+       if (adcslots[jj]>=0&&adcslots[jj]<bottomAdc) bottomAdc=adcslots[jj];
+       if (tdcslots[jj]>=0&&tdcslots[jj]>topTdc) topTdc=tdcslots[jj];
+       if (tdcslots[jj]>=0&&tdcslots[jj]<bottomTdc) bottomTdc=tdcslots[jj];
+     }
    }
    printf ("constructed Crate Scan mask = %x\n",scan_mask);  
-   printf ("topAdc %d   bottomAdc %d\n",topAdc,bottomAdc);
+   if (topAdc > -1) {
+     printf ("topAdc %d   bottomAdc %d\n",topAdc,bottomAdc);
+   } else {
+     printf ("No ADCs in this crate \n");
+   }
+   if (topTdc > -1) {
+     printf ("topTdc %d   bottomTdc %d\n",topTdc,bottomTdc);
+   } else {
+     printf ("No TDCs in this crate \n");
+   }
  }
 
 { 
@@ -1401,7 +1448,7 @@ trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trig
     /* reset ADCs */
     for (kk==0; kk<nmodules; kk++) {
       padr   = adcslots[kk];
-      fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
+      if (padr >= 0) fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
     }  
     sfi_error_decode(0);
 { 
@@ -1418,28 +1465,52 @@ trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trig
 /* program the ADC modules.  top slot and bottom are book-ends to 
   form a multiblock.  This means there should be at least 3 modules. */ 
 
- printf("programming ADCs.  Num of modules = %d\n",nmodules);
+ printf("Programming the Modules.  Num of modules = %d\n",nmodules);
  for (kk=0; kk<nmodules; kk++) { 
 
    padr   = adcslots[kk];
-   csrvalue = 0x00001904;  
-   if (padr == topAdc) csrvalue = 0x00000904;
-   if (padr == bottomAdc) csrvalue = 0x00001104;
+   if (padr >= 0) {
+     csrvalue = 0x00001904;  
+     if (padr == topAdc) csrvalue = 0x00000904;
+     if (padr == bottomAdc) csrvalue = 0x00001104;
 
-   printf("slot %d  %d   csr0 0x%x \n",kk,padr,csrvalue);
-   fb_fwc_1(padr,0,csrvalue,1,1,0,1,0,1,1);
+     printf("ADC slot %d  %d   csr0 0x%x \n",kk,padr,csrvalue);
+     fb_fwc_1(padr,0,csrvalue,1,1,0,1,0,1,1);
    
-   sadr = 1;
-   csrvalue = defaultAdcCsr1;
-   if (pedsuppress == 1) csrvalue |= 0x40000000;
-   printf("csr1 0x%x \n",csrvalue);
-   fb_fwc_1(0,sadr,csrvalue,1,1,1,0,0,1,1);
+     sadr = 1;
+     csrvalue = defaultAdcCsr1;
+     if (pedsuppress == 1) csrvalue |= 0x40000000;
+     printf("ADC csr1 0x%x \n",csrvalue);
+     fb_fwc_1(0,sadr,csrvalue,1,1,1,0,0,1,1);
 
-   sadr = 7 ;
-   fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
-   fprel(); 
-   sfi_error_decode(0);
+     sadr = 7 ;
+     fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
+     fprel(); 
+     sfi_error_decode(0);
+
+   }
+
+   padr   = tdcslots[kk];
+   if (padr >= 0) {
+     csrvalue = 0x00001900; 
+     if (padr == topTdc) csrvalue = 0x00000900;
+     if (padr == bottomTdc) csrvalue = 0x00001100;
+     printf("TDC slot %d  %d   csr0 0x%x \n",kk,padr,csrvalue);
+     fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,1,1);
+     fb_fwc_1(0,0,csrvalue,1,1,1,1,0,1,1);
+      sadr = 1 ;
+      fb_fwc_1(0,sadr,0x40000003,1,1,1,0,0,1,1);
+      sadr = 18 ;
+      fb_fwc_1(0,sadr,0xbb6,1,1,1,0,0,1,1);
+      sadr = 7 ;
+      fb_fwc_1(0,sadr,2,1,1,1,0,0,1,1);
+      fprel(); 
+      sfi_error_decode(0);
+   }
+
  }
+
+
 
     daLogMsg("INFO","User Prestart Executed");
   }   
@@ -1682,9 +1753,12 @@ if (branch_num==numBranchdata ) {
   fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
     {*(rol->dabufp)++ = ( 0xda000011 );} ; 
     padr   = topAdc  ;
-    fpbr(padr,520); 
-    {*(rol->dabufp)++ = ( ii );} ; 
+    fpbr(padr,2000); 
     {*(rol->dabufp)++ = ( 0xda000022 );} ; 
+    padr   = topTdc  ;
+    fpbr(padr,2000); 
+    {*(rol->dabufp)++ = ( ii );} ; 
+    {*(rol->dabufp)++ = ( 0xda000033 );} ; 
 { 
   datascan = 0;
   fbres = fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
