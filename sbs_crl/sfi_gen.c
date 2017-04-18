@@ -1753,10 +1753,10 @@ if (branch_num==numBranchdata ) {
   fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
     {*(rol->dabufp)++ = ( 0xda000011 );} ; 
     padr   = topAdc  ;
-    fpbr(padr,2000); 
+    if (padr >= 0) fpbr(padr,2000); 
     {*(rol->dabufp)++ = ( 0xda000022 );} ; 
     padr   = topTdc  ;
-    fpbr(padr,2000); 
+    if (padr >= 0) fpbr(padr,2000); 
     {*(rol->dabufp)++ = ( ii );} ; 
     {*(rol->dabufp)++ = ( 0xda000033 );} ; 
 { 
