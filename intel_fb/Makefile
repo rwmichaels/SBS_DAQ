@@ -27,9 +27,12 @@ CFLAGS			= -Wall -O2 -I${LINUXVME_INC} -I. -I/root/sfi/libsrc/ \
 			  -I/usr/include -I/root/coda/extensions/linuxvme/jvme \
 			  -L${LINUXVME_LIB} -L/root/sfi/libsrc -L.
 
-PROGS			= test_1877 test_1881 sfiTrigTest
+PROGS			= test_1877 test_1881 sfiTrigTest fb_diag_cl.so
 
 all: $(PROGS)
+
+fb_diag_cl.so: fb_diag_cl.c
+	$(CC) -fpic -shared $(CFLAGS) -o fb_diag_cl.so fb_diag_cl.c
 
 clean distclean:
 	@rm -f $(PROGS) *~ *.so
