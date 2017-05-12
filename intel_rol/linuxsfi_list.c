@@ -9,6 +9,13 @@
 
 */
 
+#ifndef LSWAP
+#define LSWAP(x)        ((((x) & 0x000000ff) << 24) | \
+                         (((x) & 0x0000ff00) <<  8) | \
+                         (((x) & 0x00ff0000) >>  8) | \
+                         (((x) & 0xff000000) >> 24))
+#endif
+
 /* Global variables here */
 
 /* parameters that configure the crate */
@@ -1344,6 +1351,7 @@ bigendian_out = 1;
 
  /* Open Slave Window for SFI Initiated Block transfers */
   vmeOpenSlaveA32(0x18000000,0x00400000);
+  dmaPUseSlaveWindow(1);
 
 { 
   int sfi_addr=0xe00000;
@@ -1688,11 +1696,12 @@ void titrig(unsigned long EVTYPE,unsigned long EVSOURCE)
 {
     long EVENT_LENGTH;
   {   
-unsigned long dCnt, ev_type, ii, datascan, was_scan, res, jj, fbres, numLocal, numBranchdata, 
+    unsigned long dCnt, ev_type, ii, xtmp, datascan, swap_scan, was_scan, res, jj, fbres, numLocal, numBranchdata, 
 syncFlag;   *sfi.sequencerEnable = 0;
   rol->dabufp = (long *) 0;
 { 
 {
+  ev_type=1;
   if(readout_ti==1)
     {
       dCnt = tiReadBlock(tiData,50,0);
@@ -1702,10 +1711,14 @@ syncFlag;   *sfi.sequencerEnable = 0;
 	}
       else
 	{
-	  ev_type=(tiData[2]&(0xFF000000))>>24;  
+          xtmp = LSWAP(tiData[2]);
+	  ev_type=(xtmp&(0xFF000000))>>24;  
+          if (ev_type<=0) ev_type=1;  /* problem with trigger type */
+          ev_type &= 0xF; /*CODA 2.x only allows for 4 bits of trigger type*/
 	  tibready = tiBReady();
 	  numLocal= tiGetReadoutEvents();  
-    	  numBranchdata=(tiData[4]&(0xF0000000))>>28;  
+          xtmp = LSWAP(tiData[4]);
+	  numBranchdata=(xtmp&(0xF0000000))>>28;  
 	  syncFlag = tiGetSyncEventFlag();
 	  if (numBranchdata==0){
 	  nb++;
@@ -1734,7 +1747,7 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 	{
 	   *rol->dabufp++ =  0xddddcccc;
 	   for(ii=0; ii<dCnt; ii++) {
-	     *rol->dabufp++ = tiData[ii];
+	     *rol->dabufp++ = LSWAP(tiData[ii]);
            }
            *rol->dabufp++ = 0xb0b04444;
            *rol->dabufp++ = branch_num;
@@ -1747,12 +1760,13 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
  }
  } 
 { 
-ii=50;
-if (branch_num==numBranchdata ) {
+ii=100;
+datascan = 0;
+ if (branch_num==numBranchdata ) {
   ii=0;
-  datascan = 0;
   while ((ii<50) && ((datascan&scan_mask) != scan_mask)) {
-    fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
+    fb_frcm_1(9,0,&swap_scan,1,0,1,0,0,0);
+    datascan=swap_scan;
     ii++;
   }
  }
@@ -1786,6 +1800,8 @@ else{
 logMsg("Error: datascan = 0x%08x fbres = 0x%x numBranchdata = %d \n",datascan,fbres,numBranchdata);  }
  } 
     {*(rol->dabufp)++ = ( was_scan );} ; 
+    {*(rol->dabufp)++ = ( numBranchdata );} ; 
+    {*(rol->dabufp)++ = ( branch_num );} ; 
     {*(rol->dabufp)++ = ( ii );} ; 
     {*(rol->dabufp)++ = ( 0xda0000ff );} ; 
 } 
