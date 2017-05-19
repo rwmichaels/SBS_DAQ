@@ -9,12 +9,30 @@
 
 */
 
+
+#define MAX_LENGTH 200
+#define BUFFER_SIZE 1024
+#define NBUFFER     100
+
+
 #ifndef LSWAP
 #define LSWAP(x)        ((((x) & 0x000000ff) << 24) | \
                          (((x) & 0x0000ff00) <<  8) | \
                          (((x) & 0x00ff0000) >>  8) | \
                          (((x) & 0xff000000) >> 24))
 #endif
+#define PUTEVENT(part)      {						\
+    the_event->length =							\
+      (((long)(dma_dabufp) - (long)(&the_event->data[0]))>>2);		\
+    dmaPAddItem(part,the_event);					\
+  }				
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include "jvme.h"
+#include "libsfifb.h"
+#include "dmaPList.h"
 
 /* Global variables here */
 
@@ -50,11 +68,16 @@ int bottomAdc=0;
 int topTdc=0;
 int bottomTdc=0;
 
+unsigned int *dmaptr=0;
+unsigned int *pfbdata;
+extern void *a32slave_window;
+extern DMANODE *the_event;
+extern unsigned int *dma_dabufp;
+
+DMA_MEM_ID vmeIN,vmeOUT;
+
 /* # 1 "linuxsfi_list.c" */
 /* # 1 "/site/coda/2.6.2/common/include/rol.h" 1 */
-typedef void (*VOIDFUNCPTR) ();
-typedef int (*FUNCPTR) ();
-typedef unsigned long time_t;
 typedef struct semaphore *SEM_ID;
 static void __download ();
 static void __prestart ();
@@ -503,30 +526,6 @@ extern volatile unsigned long *fastDisableSequencer;
 /* # 22 "/site/coda/2.6.2/common/include/SFI_source.h" 2 */
 /* # 1 "/site/coda/2.6.2/common/include/sfi_triglib.h" 1 */
 unsigned int sfiAuxVersion = 0;  
-static inline void
-sfiAuxWrite(val32)
-     unsigned long val32;
-{
-  *sfi.sequencerDisable = 0;
-  *sfi.writeAuxReg = val32;
-  *sfi.writeVmeOutSignalReg = 0x4000;
-  *sfi.generateAuxB40Pulse = 0;
-  *sfi.writeVmeOutSignalReg = 0x40000000;
-}
-unsigned long
-sfiAuxRead()
-{
-  int xx=0;
-  unsigned long val32 = 0xffffffff;
-  *sfi.sequencerDisable = 0;
-  *sfi.writeVmeOutSignalReg = 0x2000;
-  while ( (xx<10) && (val32 == 0xffffffff) ) {
-    val32 = *sfi.readLocalFbAdBus;
-    xx++;
-  }
-  *sfi.writeVmeOutSignalReg = 0x20000000;
-  return (val32);
-}
 int
 sfiAuxInit()
 {
@@ -1351,7 +1350,19 @@ bigendian_out = 1;
 
  /* Open Slave Window for SFI Initiated Block transfers */
   vmeOpenSlaveA32(0x18000000,0x00400000);
+
   dmaPUseSlaveWindow(1);
+
+  /* INIT dmaPList */
+  dmaPFreeAll();
+  vmeIN  = dmaPCreate("vmeIN",BUFFER_SIZE,NBUFFER,0);
+  vmeOUT = dmaPCreate("vmeOUT",0,0,0);
+  
+  dmaPStatsAll();
+  
+  dmaPReInitAll();
+
+
 
 { 
   int sfi_addr=0xe00000;
@@ -1362,6 +1373,8 @@ bigendian_out = 1;
      printf("Calling InitSFI() routine with laddr=0x%x.\n",laddr);
      InitSFI(laddr);
   }
+  InitFastbus(0x20,0x33);
+
  } 
  {
    printf("Map of Fastbus Modules \n");
@@ -1694,12 +1707,36 @@ input_event__ )->n = 0;( & input_event__ ->part->list )->c++;	if(( & input_event
 }
 void titrig(unsigned long EVTYPE,unsigned long EVSOURCE)
 {
+  /* HEREHEREHERE */
+
     long EVENT_LENGTH;
   {   
-    unsigned long dCnt, ev_type, ii, xtmp, datascan, swap_scan, was_scan, res, jj, fbres, numLocal, numBranchdata, 
-syncFlag;   *sfi.sequencerEnable = 0;
+    unsigned long dCnt, ev_type, ii, slot, lenb, rb, rlen, xtmp, datascan, swap_scan, was_scan, res, jj, fbres, numLocal, numBranchdata, 
+syncFlag;  
+    unsigned int len=MAX_LENGTH;
+    int turnon0=1;
+    int turnon1=1;
+    int turnon2=1;
+    int turnon3=1;
+    int turnon4=1;
+    int turnon5=1;
+
+    static int ldebug=1;
+  *sfi.sequencerEnable = 0;
+
   rol->dabufp = (long *) 0;
-{ 
+
+
+  if(turnon0) {
+     GETEVENT(vmeIN,0); 
+
+     pfbdata = (unsigned int *)dma_dabufp;
+  
+     dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
+
+  }
+
+ { 
 {
   ev_type=1;
   if(readout_ti==1)
@@ -1726,7 +1763,12 @@ syncFlag;   *sfi.sequencerEnable = 0;
 	}
     }
 }
- } 
+ }
+
+ if (turnon0) {
+   PUTEVENT(vmeOUT); 
+ }
+
 {	{if(__the_event__ == (DANODE *) 0 && rol->dabufp == ((void *) 0) ) { {{ ( __the_event__ ) = 0; if (( 
 &( rol->pool ->list) )->c){ ( &( rol->pool ->list) )->c--; ( __the_event__ ) = ( &( rol->pool 
 ->list) )->f; ( &( rol->pool ->list) )->f = ( &( rol->pool ->list) )->f->n; }; if (!( &( rol->pool ->list) 
@@ -1762,31 +1804,62 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 { 
 ii=100;
 datascan = 0;
+ if(ldebug) logMsg("about to check datascan \n");
  if (branch_num==numBranchdata ) {
   ii=0;
   while ((ii<50) && ((datascan&scan_mask) != scan_mask)) {
-    fb_frcm_1(9,0,&swap_scan,1,0,1,0,0,0);
-    datascan=swap_scan;
+    fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
     ii++;
   }
  }
  was_scan=datascan;
+ if(datascan!=0) logMsg("datascan 0x%x 0x%x \n",datascan,scan_mask);
  } 
 {	long *StartOfBank; StartOfBank = (rol->dabufp); *(++(rol->dabufp)) = ((( 7 ) << 16) | ( 0x01 ) 
 << 8) | ( 0 );	((rol->dabufp))++; ; if(( ii <  50) ) {
-  fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
+
+
+
+    if (turnon1) fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
     {*(rol->dabufp)++ = ( 0xda000011 );} ; 
-    padr   = topAdc  ;
-    if (padr >= 0) fpbr(padr,2000); 
-    {*(rol->dabufp)++ = ( 0xda000022 );} ; 
-    padr   = topTdc  ;
-    if (padr >= 0) fpbr(padr,2000); 
+
+
+    if(ldebug) logMsg("about to read ADC \n");
+/*  (May 15, 2017) Loop over slots and read each one */
+    lenb = len<<2;
+    if (turnon2) {
+      for (slot=bottomAdc; slot<=topAdc; slot++) {
+        if(ldebug) logMsg("Adc read loop, slot %d \n",slot);
+         res = fb_frdb_1(slot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
+         rlen = rb>>2;
+         if(ldebug) logMsg("Adc rlen %d %d %d %d \n",rb,LSWAP(rb),(LSWAP(rb)>>2),rlen);
+         if (rlen < 0 || rlen > MAX_LENGTH) rlen=64;
+         if(ldebug=17) {
+           for (ii=0; ii<10; ii++) printf("data[%d] =    0x%x  swapped 0x%x\n",ii,pfbdata[ii],LSWAP(pfbdata[ii]));
+	 }
+         if(turnon3) {
+            for(ii=0;ii<rlen;ii++) *(rol->dabufp)++ = LSWAP(pfbdata[ii]);
+	 }
+      }
+    }
+    if(ldebug) logMsg("here, after ADC read \n");
+
+/*  (May 15, 2017) Block read not yet working, 
+              loop over slots instead, see above */
+  /*
+       padr   = topAdc  ;
+       if (padr >= 0) fpbr(padr,2000); 
+       {*(rol->dabufp)++ = ( 0xda000022 );} ; 
+       padr   = topTdc  ;
+       if (padr >= 0) fpbr(padr,2000); 
+  */
+
     {*(rol->dabufp)++ = ( ii );} ; 
     {*(rol->dabufp)++ = ( 0xda000033 );} ; 
 { 
   datascan = 0;
-  fbres = fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
-  if (fbres) logMsg("fbres = 0x%x scan_mask 0x%x datascan 0x%x\n",fbres,scan_mask,datascan,0,0,0);
+  if (turnon4) fbres = fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
+  if (fbres && ldebug) logMsg("fbres = 0x%x scan_mask 0x%x datascan 0x%x\n",fbres,scan_mask,datascan,0,0,0);
   if ((datascan != 0) && (datascan&~scan_mask)) { 
 logMsg("Error: Read data but More data available after readout datascan = 0x%08x fbres = 0x%x\n",datascan,fbres,0,0,0,0);   }
  } 
@@ -1794,8 +1867,8 @@ logMsg("Error: Read data but More data available after readout datascan = 0x%08x
 else{
 { 
   datascan = 0;
-  fbres = fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
-  if (fbres) logMsg("fbres = 0x%x\n",fbres,0,0,0,0,0);
+  if(turnon5) fbres = fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
+  if (fbres && ldebug) logMsg("fbres = 0x%x\n",fbres,0,0,0,0,0);
   if ((datascan != 0) && (datascan&~scan_mask)) { 
 logMsg("Error: datascan = 0x%08x fbres = 0x%x numBranchdata = %d \n",datascan,fbres,numBranchdata);  }
  } 
@@ -1804,7 +1877,9 @@ logMsg("Error: datascan = 0x%08x fbres = 0x%x numBranchdata = %d \n",datascan,fb
     {*(rol->dabufp)++ = ( branch_num );} ; 
     {*(rol->dabufp)++ = ( ii );} ; 
     {*(rol->dabufp)++ = ( 0xda0000ff );} ; 
-} 
+ }
+
+
 *StartOfBank = (long) (((char *) (rol->dabufp)) - ((char *) StartOfBank));	if ((*StartOfBank 
 & 1) != 0) { (rol->dabufp) = ((long *)((char *) (rol->dabufp))+1); *StartOfBank += 1; }; if 
 ((*StartOfBank & 2) !=0) { *StartOfBank = *StartOfBank + 2; (rol->dabufp) = ((long *)((short *) 
@@ -1814,6 +1889,8 @@ logMsg("Error: datascan = 0x%08x fbres = 0x%x numBranchdata = %d \n",datascan,fb
 ((*StartOfEvent[event_depth__] & 2) !=0) { *StartOfEvent[event_depth__] = *StartOfEvent[event_depth__] + 2; (rol->dabufp) = 
 ((long *)((short *) (rol->dabufp))+1);; };	*StartOfEvent[event_depth__] = ( 
 (*StartOfEvent[event_depth__]) >> 2) - 1;}; ;   }   
+
+
     return;
    fooy: 
     sfi_error_decode(0) ;
