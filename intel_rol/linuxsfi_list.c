@@ -1724,7 +1724,10 @@ syncFlag;
     int turnon4=1;
     int turnon5=1;
 
+    static int levnum=0;
 
+/* A test where I embedded the test code here.  Let this be zero normally.
+   Eventually I will remove this. */
     int JUST_A_TEST=0;
     int option1=0;
     int option2=0;
@@ -1735,14 +1738,15 @@ syncFlag;
     int use_mydata=0;
     int mydata[1000];
     static int first_time=1;
+ /* end of variables for test code */
 
-    static int ldebug=1;
+    static int ldebug=0;
   *sfi.sequencerEnable = 0;
 
   rol->dabufp = (long *) 0;
 
 
-  if (first_time) {
+  if (first_time) { /* need to set up DMA */
 
     first_time=0;
     /* INIT dmaPList */
@@ -1760,8 +1764,13 @@ syncFlag;
 
   if(ldebug) logMsg("Event Loop: DMA ptrs = 0x%x 0x%x 0x%x 0x%x \n",the_event,__the_event__,dmaptr,dma_dabufp);
 
-  /* not sure why I need to do this */
+
+/* FIXME: Here is a problem.  After lots of events "the_event" becomes zero.
+   But these lines recovers from it. */
+
+  levnum++;
   if(the_event==0) {
+      logMsg("\n\n the_event==0 at event %d \n",levnum);
       dmaPFreeAll();
       vmeIN  = dmaPCreate("vmeIN",BUFFER_SIZE,NBUFFER,0);
       vmeOUT = dmaPCreate("vmeOUT",0,0,0);
@@ -1783,6 +1792,8 @@ syncFlag;
 	}
       else
 	{
+
+/* FIXME: need these swaps, else data are corrupted, it seems */
           xtmp = LSWAP(tiData[2]);
 	  ev_type=(xtmp&(0xFF000000))>>24;  
           if (ev_type<=0) ev_type=1;  /* problem with trigger type */
@@ -2004,7 +2015,7 @@ if (branch_num==numBranchdata ) {
         if(ldebug) logMsg("Adc read loop, slot %d \n",slot);
          res = fb_frdb_1(slot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
          rlen = rb>>2;
-         if(ldebug) logMsg("Adc rlen %d %d %d %d \n",rb,LSWAP(rb),(LSWAP(rb)>>2),rlen);
+         if(ldebug) logMsg("Adc rlen %d  %d \n",rb,rlen);
          if (rlen < 0 || rlen > MAX_LENGTH) rlen=64;
          if(ldebug==17) {
            for (ii=0; ii<10; ii++) printf("data[%d] =    0x%x  swapped 0x%x\n",ii,pfbdata[ii],LSWAP(pfbdata[ii]));
