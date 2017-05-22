@@ -1446,7 +1446,7 @@ trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trig
     fb_init_1(0);
 
     /* reset ADCs */
-    for (kk==0; kk<nmodules; kk++) {
+    for (kk=0; kk<nmodules; kk++) {
       padr   = adcslots[kk];
       if (padr >= 0) fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
     }  
