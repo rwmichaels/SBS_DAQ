@@ -12,7 +12,14 @@
 
 #define MAX_LENGTH 200
 #define BUFFER_SIZE 1024
-#define NBUFFER     100
+#define NBUFFER     400
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include "jvme.h"
+#include "libsfifb.h"
+#include "dmaPList.h"
 
 
 #ifndef LSWAP
@@ -21,18 +28,7 @@
                          (((x) & 0x00ff0000) >>  8) | \
                          (((x) & 0xff000000) >> 24))
 #endif
-#define PUTEVENT(part)      {						\
-    the_event->length =							\
-      (((long)(dma_dabufp) - (long)(&the_event->data[0]))>>2);		\
-    dmaPAddItem(part,the_event);					\
-  }				
 
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include "jvme.h"
-#include "libsfifb.h"
-#include "dmaPList.h"
 
 /* Global variables here */
 
@@ -71,7 +67,6 @@ int bottomTdc=0;
 unsigned int *dmaptr=0;
 unsigned int *pfbdata;
 extern void *a32slave_window;
-extern DMANODE *the_event;
 extern unsigned int *dma_dabufp;
 
 DMA_MEM_ID vmeIN,vmeOUT;
@@ -194,9 +189,11 @@ static unsigned long theEvMask, currEvMask, currType, evMasks[16 ];
 static VOIDFUNCPTR wrapperGenerator;
 static FUNCPTR trigRtns[32 ], syncTRtns[32 ], doneRtns[32 ], ttypeRtns[32 ];
 static unsigned long Tcode[32 ];
-static DANODE *__the_event__, *input_event__, *__user_event__;
 /* # 50 "/site/coda/2.6.2/common/include/trigger_dispatch.h" */
 /* # 141 "/site/coda/2.6.2/common/include/trigger_dispatch.h" */
+
+extern DMANODE *the_event;
+static DANODE *__the_event__, *input_event__, *__user_event__;
 static void cdodispatch()
 {
   unsigned long theType,theSource;
@@ -1351,17 +1348,15 @@ bigendian_out = 1;
  /* Open Slave Window for SFI Initiated Block transfers */
   vmeOpenSlaveA32(0x18000000,0x00400000);
 
+
+  printf("Setting up DMA \n");
+
   dmaPUseSlaveWindow(1);
 
-  /* INIT dmaPList */
-  dmaPFreeAll();
-  vmeIN  = dmaPCreate("vmeIN",BUFFER_SIZE,NBUFFER,0);
-  vmeOUT = dmaPCreate("vmeOUT",0,0,0);
+  /*  dmaPStatsAll();
   
-  dmaPStatsAll();
-  
-  dmaPReInitAll();
-
+      dmaPReInitAll();
+  */
 
 
 { 
@@ -1714,7 +1709,6 @@ void titrig(unsigned long EVTYPE,unsigned long EVSOURCE)
     unsigned long dCnt, ev_type, ii, slot, lenb, rb, rlen, xtmp, datascan, swap_scan, was_scan, res, jj, fbres, numLocal, numBranchdata, 
 syncFlag;  
     unsigned int len=MAX_LENGTH;
-    int turnon0=1;
     int turnon1=1;
     int turnon2=1;
     int turnon3=1;
@@ -1726,15 +1720,20 @@ syncFlag;
 
   rol->dabufp = (long *) 0;
 
+  /* INIT dmaPList */
+  dmaPFreeAll();
+  vmeIN  = dmaPCreate("vmeIN",BUFFER_SIZE,NBUFFER,0);
+  vmeOUT = dmaPCreate("vmeOUT",0,0,0);
 
-  if(turnon0) {
-     GETEVENT(vmeIN,0); 
+  GETEVENT(vmeIN,0); 
 
-     pfbdata = (unsigned int *)dma_dabufp;
+  pfbdata = (unsigned int *)dma_dabufp;
   
-     dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
+  dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
 
-  }
+  if(ldebug) logMsg("Event Loop: DMA ptrs = 0x%x 0x%x 0x%x 0x%x \n",the_event,__the_event__,dmaptr,dma_dabufp);
+
+
 
  { 
 {
@@ -1763,10 +1762,6 @@ syncFlag;
 	}
     }
 }
- }
-
- if (turnon0) {
-   PUTEVENT(vmeOUT); 
  }
 
 {	{if(__the_event__ == (DANODE *) 0 && rol->dabufp == ((void *) 0) ) { {{ ( __the_event__ ) = 0; if (( 
@@ -1802,6 +1797,119 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
  }
  } 
 { 
+
+/*********************************************/
+/* test slot 10 */
+  slot=10;
+  unsigned int *adc;   
+  adc = (unsigned int *)dma_dabufp;
+  int scanmask;
+  scanmask = (1<<slot);
+  unsigned int res, moduleID=0;
+    /****** Check Board ID  *********/
+    res = fprc(slot,0,&moduleID);
+    if (res != 0){ 
+      printf("ERROR: Read Module ID, res=0x%x\n",(unsigned int)res);
+      sfi_error_decode(2);
+      goto CLOSE;
+    } else {
+        printf("moduleID = 0x%08x\n",(unsigned int)moduleID);
+    }
+
+  /****** Reset/Clear ADC *********/
+     res = fpwc(slot,0,0x40000000);
+     if (res != 0){ 
+       printf("ERROR: Reset ADC\n");
+       goto floy;
+     }
+
+  /****** Program ADC *******/
+     res = fpwc(slot,0,0x00000104);
+     if (res != 0){ 
+        printf("ERROR: Program ADC CSR 0\n");
+        goto floy;
+     }
+      res = fpwc(slot,1,0x00000080);
+      if (res != 0){ 
+        printf("ERROR: Program ADC CSR 1\n");
+        goto floy;
+      }
+
+/****** Read ADC Module ID *********/
+     res = fprc(slot,0,&moduleID);
+     if (res != 0){ 
+        printf("ERROR: Read ADC ID\n");
+        goto floy;
+     } else {
+        printf("Module ID = 0x%x\n",moduleID);
+     }
+
+
+ /****** Readout Loop *******/
+     int iz;
+     for(iz=0;iz<1;iz++) {
+
+       res = fpwc(slot,0,0x80);
+       if (res != 0){ 
+         printf("ERROR: Test Gate ADC\n");
+         goto floy;
+       }
+
+       ii=0;
+       datascan = 0;
+       while ((ii<20) & ((datascan&scanmask) != scanmask)) {
+          res = fprcm(9,0,&datascan);
+          if (res != 0){ 
+ 	     printf("ERROR: Sparse Data Scan (res=0x%x)\n",(unsigned int)res);
+	     goto floy;
+          }
+        ii++;
+       }
+ 
+       if (ii<20) {
+         res = fpwc(slot,0,0x400);
+         if (res != 0){ 
+	   printf("ERROR: Load Next Event\n");
+	   goto floy;
+	 }
+    
+	 /* printf("pause before blk transfer\n"); */
+	 /* getchar(); */
+
+         lenb = len<<2;
+         printf("just before\n");
+         res = fb_frdb_1(slot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
+         if ((rb > (lenb+4))||(res != 0)) {
+	   printf("ERROR: Block Read   res = 0x%x maxbytes = %d returnBytes = %d \n",
+	       (unsigned int)res,lenb,(int)rb);
+	  goto floy;
+	 } else{
+	   rlen = rb>>2;
+	   printf("pause before print data\n"); 
+	   getchar();
+	   printf("DATA %d: %d words, rb = %d",(iz+1),rlen,rb);
+	   for(ii=0;ii<rlen;ii++) {
+	   if ((ii % 4) == 0) printf("\n    ");
+	   	   printf("  0x%08x",LSWAP(adc[ii])); 
+	 }
+	 printf("\n");
+	 }
+
+       }  else {
+         printf("Sparse Data scan indicates no Conversion after %d tries\n",ii);
+       }
+
+       taskDelay(30); /* wait a little before next trigger */
+
+     } /* end of for(iz=0.... */
+
+ CLOSE:
+ floy:
+
+/* end test */
+/*********************************************/
+
+
 ii=100;
 datascan = 0;
  if(ldebug) logMsg("about to check datascan \n");
@@ -1813,7 +1921,7 @@ datascan = 0;
   }
  }
  was_scan=datascan;
- if(datascan!=0) logMsg("datascan 0x%x 0x%x \n",datascan,scan_mask);
+ if(ldebug) logMsg("datascan 0x%x 0x%x \n",datascan,scan_mask);
  } 
 {	long *StartOfBank; StartOfBank = (rol->dabufp); *(++(rol->dabufp)) = ((( 7 ) << 16) | ( 0x01 ) 
 << 8) | ( 0 );	((rol->dabufp))++; ; if(( ii <  50) ) {
