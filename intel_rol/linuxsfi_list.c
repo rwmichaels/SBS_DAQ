@@ -1473,7 +1473,7 @@ trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trig
     fb_init_1(0);
 
     /* reset ADCs */
-    for (kk==0; kk<nmodules; kk++) {
+    for (kk=0; kk<nmodules; kk++) {
       padr   = adcslots[kk];
       if (padr >= 0) fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
     }  
@@ -1706,7 +1706,7 @@ void titrig(unsigned long EVTYPE,unsigned long EVSOURCE)
 
     long EVENT_LENGTH;
   {   
-    unsigned long dCnt, ev_type, ii, slot, lenb, rb, rlen, xtmp, datascan, swap_scan, was_scan, res, jj, fbres, numLocal, numBranchdata, 
+    unsigned long dCnt, ev_type, ii, kk, slot, lenb, rb, rlen, xtmp, datascan, swap_scan, was_scan, res, jj, fbres, numLocal, numBranchdata, 
 syncFlag;  
     unsigned int len=MAX_LENGTH;
     int turnon1=1;
@@ -1714,6 +1714,10 @@ syncFlag;
     int turnon3=1;
     int turnon4=1;
     int turnon5=1;
+    int JUST_A_TEST=1;
+    int do_print=0;
+    int use_mydata=0;
+    int mydata[1000];
 
     static int ldebug=1;
   *sfi.sequencerEnable = 0;
@@ -1798,6 +1802,8 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
  } 
 { 
 
+
+  if(JUST_A_TEST==0) goto floy;
 /*********************************************/
 /* test slot 10 */
   slot=10;
@@ -1877,7 +1883,6 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 	 /* getchar(); */
 
          lenb = len<<2;
-         printf("just before\n");
          res = fb_frdb_1(slot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
          if ((rb > (lenb+4))||(res != 0)) {
 	   printf("ERROR: Block Read   res = 0x%x maxbytes = %d returnBytes = %d \n",
@@ -1885,14 +1890,21 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 	  goto floy;
 	 } else{
 	   rlen = rb>>2;
-	   printf("pause before print data\n"); 
-	   getchar();
-	   printf("DATA %d: %d words, rb = %d",(iz+1),rlen,rb);
-	   for(ii=0;ii<rlen;ii++) {
-	   if ((ii % 4) == 0) printf("\n    ");
-	   	   printf("  0x%08x",LSWAP(adc[ii])); 
-	 }
-	 printf("\n");
+
+           if (do_print) {
+  	     printf("pause before print data\n"); 
+	     getchar();
+	     printf("DATA %d: %d words, rb = %d",(iz+1),rlen,rb);
+	     for(kk=0;kk<rlen;kk++) {
+	       if ((kk % 4) == 0) printf("\n    ");
+	       printf("  0x%08x",LSWAP(adc[kk])); 
+
+	     }
+ 	     printf("\n");
+	   } else { /* put data into datastream */
+             use_mydata=1;
+             for (kk=0; kk<64; kk++) mydata[kk] = LSWAP(adc[kk]);
+	   }
 	 }
 
        }  else {
@@ -1909,17 +1921,17 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 /* end test */
 /*********************************************/
 
-
 ii=100;
 datascan = 0;
- if(ldebug) logMsg("about to check datascan \n");
- if (branch_num==numBranchdata ) {
+
+if (branch_num==numBranchdata ) {
   ii=0;
   while ((ii<50) && ((datascan&scan_mask) != scan_mask)) {
     fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
     ii++;
   }
  }
+ if (JUST_A_TEST) ii=0;
  was_scan=datascan;
  if(ldebug) logMsg("datascan 0x%x 0x%x \n",datascan,scan_mask);
  } 
@@ -1931,6 +1943,12 @@ datascan = 0;
     if (turnon1) fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
     {*(rol->dabufp)++ = ( 0xda000011 );} ; 
 
+    if (use_mydata) {
+      *(rol->dabufp)++ = 0xb0b0b444;
+      for(kk=0; kk<64; kk++)  *(rol->dabufp)++ = mydata[kk];
+    }
+
+    if(JUST_A_TEST) goto done1;
 
     if(ldebug) logMsg("about to read ADC \n");
 /*  (May 15, 2017) Loop over slots and read each one */
@@ -1942,7 +1960,7 @@ datascan = 0;
          rlen = rb>>2;
          if(ldebug) logMsg("Adc rlen %d %d %d %d \n",rb,LSWAP(rb),(LSWAP(rb)>>2),rlen);
          if (rlen < 0 || rlen > MAX_LENGTH) rlen=64;
-         if(ldebug=17) {
+         if(ldebug==17) {
            for (ii=0; ii<10; ii++) printf("data[%d] =    0x%x  swapped 0x%x\n",ii,pfbdata[ii],LSWAP(pfbdata[ii]));
 	 }
          if(turnon3) {
@@ -1987,6 +2005,7 @@ logMsg("Error: datascan = 0x%08x fbres = 0x%x numBranchdata = %d \n",datascan,fb
     {*(rol->dabufp)++ = ( 0xda0000ff );} ; 
  }
 
+ done1:
 
 *StartOfBank = (long) (((char *) (rol->dabufp)) - ((char *) StartOfBank));	if ((*StartOfBank 
 & 1) != 0) { (rol->dabufp) = ((long *)((char *) (rol->dabufp))+1); *StartOfBank += 1; }; if 
