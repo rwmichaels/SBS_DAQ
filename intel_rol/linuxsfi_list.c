@@ -12,7 +12,7 @@
 
 #define MAX_LENGTH 200
 #define BUFFER_SIZE 1024
-#define NBUFFER     400
+#define NBUFFER     1000
 
 #include <stdlib.h>
 #include <string.h>
@@ -48,7 +48,7 @@ int branch_num=1;
 */
 
 int maxevsize=8192;
-int maxbuff=256;
+int maxbuff=64;
 
 /* pick multiblock(1) or not(0).  If not, then use defaultAdcCsr0 */
 static int use_multiblock=0;
@@ -1723,22 +1723,10 @@ syncFlag;
     int turnon3=1;
     int turnon4=1;
     int turnon5=1;
+    static first_time=1;
+
 
     static int levnum=0;
-
-/* A test where I embedded the test code here.  Let this be zero normally.
-   Eventually I will remove this. */
-    int JUST_A_TEST=0;
-    int option1=0;
-    int option2=0;
-    int option3=0;
-    int option4=0;
-    int option5=0;
-    int do_print=0;
-    int use_mydata=0;
-    int mydata[1000];
-    static int first_time=1;
- /* end of variables for test code */
 
     static int ldebug=0;
   *sfi.sequencerEnable = 0;
@@ -1770,7 +1758,7 @@ syncFlag;
 
   levnum++;
   if(the_event==0) {
-      logMsg("\n\n the_event==0 at event %d \n",levnum);
+      logMsg("At event %d recovering DMA buffer .... all is well. \n",levnum);
       dmaPFreeAll();
       vmeIN  = dmaPCreate("vmeIN",BUFFER_SIZE,NBUFFER,0);
       vmeOUT = dmaPCreate("vmeOUT",0,0,0);
@@ -1846,138 +1834,6 @@ StartOfEvent[event_depth__++] = (rol->dabufp); if(input_event__) {	*(++(rol->dab
 { 
 
 
-/*********************************************/
-/* This extremely awkward and slow code actually
-   works and successfully reads the ADCs and puts
-   them into the datastream, if JUST_A_TEST==1. */
-
-  if(JUST_A_TEST==0) goto fred_place;
-
-/* Loop over the slots */
-  
-  kbuf=0;
-
-  for (slot=bottomAdc; slot<=topAdc; slot++) {
- 
-    unsigned int *adc;   
-    adc = (unsigned int *)dma_dabufp;
-    int scanmask;
-    scanmask = (1<<slot);
-    unsigned int res, moduleID=0;
-  /****** Check Board ID  *********/
-    if(option1) {
-      res = fprc(slot,0,&moduleID);
-      if (res != 0){ 
-        printf("ERROR: Read Module ID, res=0x%x\n",(unsigned int)res);
-        sfi_error_decode(2);
-        goto CLOSE;
-      } else {
-        if(ldebug==2) printf("moduleID = 0x%08x\n",(unsigned int)moduleID);
-      }
-    }
-  /****** Reset/Clear ADC *********/
-    if(option2) {
-     res = fpwc(slot,0,0x40000000);
-     if (res != 0){ 
-       printf("ERROR: Reset ADC\n");
-       goto fred_place;
-     }
-    }
-  /****** Program ADC *******/
-    if(option3) {
-     res = fpwc(slot,0,0x00000104);
-     if (res != 0){ 
-        printf("ERROR: Program ADC CSR 0\n");
-        goto fred_place;
-     }
-      res = fpwc(slot,1,0x00000080);
-      if (res != 0){ 
-        printf("ERROR: Program ADC CSR 1\n");
-        goto fred_place;
-      }
-    }
-/****** Read ADC Module ID *********/
-    if(option4) {
-     res = fprc(slot,0,&moduleID);
-     if (res != 0){ 
-        printf("ERROR: Read ADC ID\n");
-        goto fred_place;
-     } else {
-       if(ldebug==2) printf("Module ID = 0x%x\n",moduleID);
-     }
-    }
-
- /****** Readout Loop *******/
-     int iz;
-     for(iz=0;iz<1;iz++) {
-       if(option5) {
-         res = fpwc(slot,0,0x80);
-         if (res != 0){ 
-           printf("ERROR: Test Gate ADC\n");
-           goto fred_place;
-         }
-       }
-       ii=0;
-       datascan = 0;
-       while ((ii<20) & ((datascan&scanmask) != scanmask)) {
-          res = fprcm(9,0,&datascan);
-          if (res != 0){ 
- 	     printf("ERROR: Sparse Data Scan (res=0x%x)\n",(unsigned int)res);
-	     goto fred_place;
-          }
-        ii++;
-       }
- 
-       if (ii<20) {
-         res = fpwc(slot,0,0x400);
-         if (res != 0){ 
-	   printf("ERROR: Load Next Event\n");
-	   goto fred_place;
-	 }
-    
-	 /* printf("pause before blk transfer\n"); */
-	 /* getchar(); */
-
-         lenb = len<<2;
-         res = fb_frdb_1(slot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
-         if ((rb > (lenb+4))||(res != 0)) {
-	   printf("ERROR: Block Read   res = 0x%x maxbytes = %d returnBytes = %d \n",
-	       (unsigned int)res,lenb,(int)rb);
-	  goto fred_place;
-	 } else{
-	   rlen = rb>>2;
-
-           if (do_print) {
-  	     printf("pause before print data\n"); 
-	     getchar();
-	     printf("DATA %d: %d words, rb = %d",(iz+1),rlen,rb);
-	     for(kk=0;kk<rlen;kk++) {
-	       if ((kk % 4) == 0) printf("\n    ");
-	       printf("  0x%08x",LSWAP(adc[kk])); 
-
-	     }
- 	     printf("\n");
-	   } else { /* put data into array for datastream */
-             use_mydata=1;
-             for (kk=0; kk<64; kk++) mydata[kbuf++] = LSWAP(adc[kk]);
-	   }
-	 }
-
-       }  else {
-         printf("Sparse Data scan indicates no Conversion after %d tries\n",ii);
-       }
-
-       taskDelay(30); /* wait a little before next trigger */
-
-     } /* end of for(iz=0.... */
-  }
-
- CLOSE:
- fred_place:
-
-/* end test */
-/*********************************************/
-
 ii=100;
 datascan = 0;
 
@@ -1988,7 +1844,6 @@ if (branch_num==numBranchdata ) {
     ii++;
   }
  }
- if (JUST_A_TEST) ii=0;
  was_scan=datascan;
  if(ldebug) logMsg("datascan 0x%x 0x%x \n",datascan,scan_mask);
  } 
@@ -2000,13 +1855,6 @@ if (branch_num==numBranchdata ) {
     if (turnon1) fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
     {*(rol->dabufp)++ = ( 0xda000011 );} ; 
 
-    if (use_mydata) {
-      *(rol->dabufp)++ = 0xb0b0b444;
-      for(kk=0; kk<kbuf; kk++)  *(rol->dabufp)++ = mydata[kk];
-    }
-
-    if(JUST_A_TEST) goto done1;
-
     if(ldebug) logMsg("about to read ADC \n");
 /*  (May 15, 2017) Loop over slots and read each one */
     lenb = len<<2;
@@ -2016,7 +1864,7 @@ if (branch_num==numBranchdata ) {
          res = fb_frdb_1(slot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
          rlen = rb>>2;
          if(ldebug) logMsg("Adc rlen %d  %d \n",rb,rlen);
-         if (rlen < 0 || rlen > MAX_LENGTH) rlen=64;
+         if (rlen < 0 || rlen > MAX_LENGTH) rlen=MAX_LENGTH;
          if(ldebug==17) {
            for (ii=0; ii<10; ii++) printf("data[%d] =    0x%x  swapped 0x%x\n",ii,pfbdata[ii],LSWAP(pfbdata[ii]));
 	 }
