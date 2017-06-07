@@ -47,7 +47,7 @@ int branch_num=1;
        rolp->pool  = partCreate(name, maxevsize  , maxbuff ,1);
 */
 
-int maxevsize=8192;
+int maxevsize=4096;
 int maxbuff=64;
 
 /* pick multiblock(1) or not(0).  If not, then use defaultAdcCsr0 */
@@ -1357,10 +1357,17 @@ bigendian_out = 1;
 
   dmaPUseSlaveWindow(1);
 
-  /*  dmaPStatsAll();
+  /* Initialize memory partition library */
+  dmaPartInit();
+
+  /*  Setup Buffer memory to store events */
+  dmaPFreeAll();
+  vmeIN  = dmaPCreate("vmeIN",BUFFER_SIZE,NBUFFER,0);
+  vmeOUT = dmaPCreate("vmeOUT",0,0,0);
+
+  dmaPStatsAll();
   
-      dmaPReInitAll();
-  */
+  dmaPReInitAll();
 
 
 { 
@@ -1734,13 +1741,10 @@ syncFlag;
   rol->dabufp = (long *) 0;
 
 
-  if (first_time) { /* need to set up DMA */
+  if (first_time) { /* nothing for now ... */
 
     first_time=0;
-    /* INIT dmaPList */
-    dmaPFreeAll();
-    vmeIN  = dmaPCreate("vmeIN",BUFFER_SIZE,NBUFFER,0);
-    vmeOUT = dmaPCreate("vmeOUT",0,0,0);
+
   } 
 
 /* empirically, we need to do this each event */
@@ -1911,6 +1915,9 @@ logMsg("Error: datascan = 0x%08x fbres = 0x%x numBranchdata = %d \n",datascan,fb
  }
 
  done1:
+
+  /* Put this event's buffer into the OUT queue. */
+  PUTEVENT(vmeOUT);
 
 *StartOfBank = (long) (((char *) (rol->dabufp)) - ((char *) StartOfBank));	if ((*StartOfBank 
 & 1) != 0) { (rol->dabufp) = ((long *)((char *) (rol->dabufp))+1); *StartOfBank += 1; }; if 
