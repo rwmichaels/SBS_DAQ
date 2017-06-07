@@ -9,6 +9,11 @@ documentation in fastbus.txt.  This is pretty old code (ca 1996)
 
 In ./intel_fb is largely the same as ./fastbus, but ported to Intel/Linux.
 
+In ./secondary is a secondary readout list for Intel/Linux. 
+The listGet macro was replaced by BoblistGet to avoid a 
+SEGFAULT.  This is not completely understood, but it did make
+the DAQ run stable.  (noted, June 2017)
+
 In ./sbs_crl/ is the vxWorks readout list for the SBS Fastbus.  
 The intention is to have ONE readout list used by all crates.  
 The readout list automatically senses what modules there are and 
