@@ -1476,10 +1476,30 @@ unsigned long pedsuppress;
 unsigned long csrvalue;
  int kk;
     daLogMsg("INFO","Entering User Prestart");
-    { GEN_handlers =0;GEN_isAsync = 0;GENflag = 0;} ;
+    
+
+    /* Asynchronous.  Recommended to avoid.  Hence commented out here
+
+{ GEN_handlers =0;GEN_isAsync = 0;GENflag = 0;} ;
 { void titrig ();void titrig_done (); doneRtns[trigId] = (FUNCPTR) ( titrig_done ) ; 
 trigRtns[trigId] = (FUNCPTR) ( titrig ) ; Tcode[trigId] = ( 1 ) ; ttypeRtns[trigId] = genttype ; {printf("linking async GEN trigger to id %d \n", trigId ); GEN_handlers = ( trigId );GEN_isAsync = 1;gentriglink( 1 ,GEN_int_handler);} 
 ;trigId++;} ;     {evMasks[ 1 ] |= (1<<( GEN_handlers ));} ;
+
+   end of asynchronous */
+
+     /* Synchronous.  Bryan Moffit says use this */
+
+    { GEN_handlers =0;GEN_isAsync = 0;GENflag = 0;} ;
+ { void titrig ();void titrig_done (); doneRtns[trigId] = (FUNCPTR) ( titrig_done ) ; 
+   trigRtns[trigId] = (FUNCPTR) ( titrig ) ; syncTRtns[trigId] = (FUNCPTR) genttest ;
+   Tcode[trigId] = ( 1 ) ; ttypeRtns[trigId] = genttype ; 
+   {printf("linking sync GEN trigger to id %d \n", trigId ); 
+  GEN_handlers = ( trigId );GEN_isAsync = 0;} ;trigId++;};     
+  {evMasks[ 1 ] |= (1<<( GEN_handlers ));} ;
+    rol->poll = 1;
+
+    /* end of synchronous block */
+
 
     fb_init_1(0);
 
