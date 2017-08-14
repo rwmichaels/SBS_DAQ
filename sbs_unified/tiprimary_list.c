@@ -37,6 +37,8 @@
 #endif
 #include <TIPRIMARY_source.h>
 
+#define TI_READOUT  TI_READOUT_TS_INT
+
 #if ((TI_READOUT == TI_READOUT_EXT_POLL) || (TI_READOUT == TI_READOUT_TS_POLL) || (defined LINUX))
 #define POLLING___
 #endif
