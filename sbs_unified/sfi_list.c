@@ -7,8 +7,8 @@
 
 /* Event Buffer definitions */
 #define MAX_EVENT_POOL     128  /* Recommended >= 2 * BUFFERLEVEL */
-#define MAX_EVENT_LENGTH   512  /* Size in Bytes */
-#define DS_TIMEOUT            50   /* how long to wait for datascan */
+#define MAX_EVENT_LENGTH  2048  /* Size in Bytes */
+#define DS_TIMEOUT          50   /* how long to wait for datascan */
 
 /* Global variables here */
 
@@ -77,9 +77,8 @@ rocDownload()
    *   TI SETUP
    *****************/
 
-  tiSetFiberLatencyOffset_preInit(0x40); 
-  tiSetCrateID_preInit(0x1);  
-  tiInit(TI_ADDR ,trig_mode ,0);
+  /* note, tiInit is done in tiprimary_list.c */
+
   tiDisableBusError();
   if(readout_ti==0)  
     {
@@ -96,6 +95,13 @@ rocDownload()
   /***************************
    *   SFI and FASTBUS SETUP
    ***************************/
+
+ if (sysLocalToBusAdrs(0x09,0,&sfi_cpu_mem_offset)) { 
+     printf("**ERROR** in sysLocalToBusAdrs() call \n"); 
+     printf("sfi_cpu_mem_offset=0 FB Block Reads may fail \n"); 
+  } else { 
+     printf("sfi_cpu_mem_offset = 0x%x \n",sfi_cpu_mem_offset); 
+  } 
 
   sfi_addr=0xe00000;
 #ifdef VXWORKS
@@ -114,7 +120,7 @@ rocDownload()
    printf("Map of Fastbus Modules \n");
    fb_map();
 
-   load_cratemap();
+   /*   load_cratemap(); */
 
    nmodules=0;
    nadc = 0;
