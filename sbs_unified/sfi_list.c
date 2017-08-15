@@ -7,7 +7,7 @@
 
 /* Event Buffer definitions */
 #define MAX_EVENT_POOL     128  /* Recommended >= 2 * BUFFERLEVEL */
-#define MAX_EVENT_LENGTH  2048  /* Size in Bytes */
+#define MAX_EVENT_LENGTH  6500  /* Size in Bytes; assumes 10 ADCs + 10 TDCs */
 #define DS_TIMEOUT          50   /* how long to wait for datascan */
 
 /* Global variables here */
@@ -330,6 +330,11 @@ rocTrigger(int arg)
       {
 
         numBranchdata=(dma_dabufp[4]&(0xF0000000))>>28;  
+        if(numBranchdata <= 0) {
+	  /* problem here, use default */
+          numBranchdata = branch_num;
+	}
+
 
         ev_type = tiDecodeTriggerType((volatile unsigned int *)dma_dabufp, dCnt, 1);
         if(ev_type <= 0)
@@ -351,9 +356,10 @@ rocTrigger(int arg)
 
   BANKOPEN(5,BT_UI4,0);
 
+  ii=0;
+  datascan = 0;
+
   if (branch_num==numBranchdata ) {
-      ii=0;
-      datascan = 0;
       while ((ii<DS_TIMEOUT) && ((datascan&scan_mask) != scan_mask)) {
            fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
            ii++;
@@ -362,6 +368,8 @@ rocTrigger(int arg)
 
   *(rol->dabufp)++ = 0xda000011; 
   *(rol->dabufp)++ = datascan;
+  *(rol->dabufp)++ = branch_num;
+  *(rol->dabufp)++ = numBranchdata;
   *(rol->dabufp)++ = ii;
 
   if (ii<DS_TIMEOUT) {
