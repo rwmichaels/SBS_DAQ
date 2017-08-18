@@ -58,9 +58,9 @@ ifdef DEBUG
 else
 	CFLAGS		= -O3
 endif
-CFLAGS			+= -O -w -m32 -L. -L${LINUXVME_LIB}
+CFLAGS			+= -O -w -m32 -L. -L${LINUXVME_LIB} -L/root/sfi/libsrc 
 CFLAGS			+= -DLINUX -DDAYTIME=$(DT)
-LIBS			= -lrt -lpthread -ljvme -lti 
+LIBS			= -lrt -lpthread -ljvme -lti -lsfifb /root/sfi/test/fb_diag_cl.so
 INCS			= -I. -I${LINUXVME_INC} -I${CODA}/common/include
 DEPS			+= $(VMEROL:%.so=%.d)
 else #VXWORKS
