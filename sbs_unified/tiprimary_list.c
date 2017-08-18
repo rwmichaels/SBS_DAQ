@@ -37,7 +37,7 @@
 #endif
 #include <TIPRIMARY_source.h>
 
-#define TI_READOUT  TI_READOUT_TS_INT
+/* TI_READOUT is defined in the main source where rocDownload etc defined */
 
 #if ((TI_READOUT == TI_READOUT_EXT_POLL) || (TI_READOUT == TI_READOUT_TS_POLL) || (defined LINUX))
 #define POLLING___
@@ -148,6 +148,10 @@ static void __download()
 
   /* Open the default VME windows */
   vmeOpenDefaultWindows();
+
+ /* Open Slave Window for SFI Initiated Block transfers */
+  vmeOpenSlaveA32(0x18000000,0x00400000);
+  dmaPUseSlaveWindow(1);
 
   /* Initialize memory partition library */
   dmaPartInit();
@@ -607,6 +611,9 @@ __attribute__((destructor)) void end (void)
 
       dmaPFreeAll();
       vmeCloseDefaultWindows();
+
+      vmeCloseA32Slave();
+
 #endif
       ended=1;
     }
