@@ -3,6 +3,8 @@
  *  sfi_list.c - Readout list for an SFI-based Fastbus crate with
  *               a CODA-3 style TI board.
  *
+ *  author: R. Michaels, based on code linuxvme_list.c from B. Moffit
+ *             with the SFI/Fastbus stuff added.
  */
 
 /* Event Buffer definitions */
@@ -18,6 +20,7 @@
 int TI_ADDR=0x80000;  
 
 int readout_ti=1;
+int readout_fastbus=1;
 int trig_mode=1;  
 int BLOCKLEVEL=1;
 int BUFFERLEVEL=1;
@@ -39,7 +42,7 @@ int topTdc=0;
 int bottomTdc=0;
 
 #define FIBER_LATENCY_OFFSET 0x4A  /* measured longest fiber length */
-#define TI_READOUT TI_READOUT_EXT_POLL
+#define TI_READOUT TI_READOUT_TS_INT
 
 #include "tiprimary_list.c" /* source required for CODA */
 
@@ -96,13 +99,14 @@ rocDownload()
    *   SFI and FASTBUS SETUP
    ***************************/
 
+#ifdef VXWORKS
  if (sysLocalToBusAdrs(0x09,0,&sfi_cpu_mem_offset)) { 
      printf("**ERROR** in sysLocalToBusAdrs() call \n"); 
      printf("sfi_cpu_mem_offset=0 FB Block Reads may fail \n"); 
   } else { 
      printf("sfi_cpu_mem_offset = 0x%x \n",sfi_cpu_mem_offset); 
   } 
-
+#endif
   sfi_addr=0xe00000;
 #ifdef VXWORKS
   res = (unsigned long) sysBusToLocalAdrs(0x39,sfi_addr ,&laddr);
@@ -116,6 +120,9 @@ rocDownload()
      printf("Calling InitSFI() routine with laddr=0x%x.\n",laddr);
      InitSFI(laddr);
   }
+
+  InitFastbus(0x20,0x33);
+
 
    printf("Map of Fastbus Modules \n");
    fb_map();
@@ -194,17 +201,17 @@ rocPrestart()
   for (kk=0; kk<nadc; kk++) {
       padr   = adcslots[kk];
       if (padr >= 0) fb_fwc_1(padr,0,0x40000000,1,1,0,1,0,0,0);
-    }  
-    sfi_error_decode(0);
+  }  
+  sfi_error_decode(0);
 
-    pedsuppress = 0;  
-    /* normally would use usrstrutils to get this flag; later */
-    printf("ped suppression ? %d \n",pedsuppress); 
-    if(pedsuppress) {
+  pedsuppress = 0;  
+  /* normally would use usrstrutils to get this flag; later */
+  printf("ped suppression ? %d \n",pedsuppress); 
+  if(pedsuppress) {
       load_thresholds();
       set_thresholds();
-    }
-    sfi_error_decode(0);
+  }
+  sfi_error_decode(0);
 
 /* program the ADC and TDC modules.  top slot and bottom are book-ends to 
   form a multiblock.  This means there should be at least 3 modules of each type. */ 
@@ -288,10 +295,19 @@ rocEnd()
 void
 rocTrigger(int arg)
 {
-  int ii, islot;
+  int ii, res, islot;
   int stat, dCnt, len=0, idata;
   int ev_type = 0;
+  static int verbose=0;
   unsigned long datascan, jj, fbres, numBranchdata;
+  unsigned long lenb = (((MAX_EVENT_LENGTH>>4)-2)<<2);
+
+#ifdef LINUX
+  unsigned int *dmaptr;
+  unsigned long rb;
+  dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
+#endif
+
 
   EVENTOPEN(ev_type, BT_BANK);
 
@@ -310,15 +326,26 @@ rocTrigger(int arg)
    */
   vmeDmaConfig(2,3,1);
 
-  /* test words */
+  /* test words. */
+
+#ifdef VXWORKS
   *dma_dabufp++ = 0xb0b0b044;
   *dma_dabufp++ = 0xb0b0b055;
   *dma_dabufp++ = 0xb0b0b066;
   *dma_dabufp++ = 0xb0b0b077;
+#endif
+#ifdef LINUX
+  *dma_dabufp++ = LSWAP(0xb0b0b044);
+  *dma_dabufp++ = LSWAP(0xb0b0b055);
+  *dma_dabufp++ = LSWAP(0xb0b0b066);
+  *dma_dabufp++ = LSWAP(0xb0b0b077);
+#endif
+
 
   numBranchdata=0;
 
   if (readout_ti==1) {
+
     dCnt = tiReadBlock((volatile unsigned int *)dma_dabufp,
 		     8+(5*BLOCKLEVEL), 1);
     if(dCnt<=0)
@@ -352,6 +379,7 @@ rocTrigger(int arg)
     }
   }
 
+
   BANKCLOSE;
 
   BANKOPEN(5,BT_UI4,0);
@@ -366,28 +394,68 @@ rocTrigger(int arg)
       }
   }
 
+
+#ifdef VXWORKS
   *(rol->dabufp)++ = 0xda000011; 
   *(rol->dabufp)++ = datascan;
   *(rol->dabufp)++ = branch_num;
   *(rol->dabufp)++ = numBranchdata;
+  *(rol->dabufp)++ = lenb;
   *(rol->dabufp)++ = ii;
+#endif
+#ifdef LINUX
+  *dma_dabufp++ = LSWAP(0xda000011); 
+  *dma_dabufp++ = LSWAP(datascan);
+  *dma_dabufp++ = LSWAP(branch_num);
+  *dma_dabufp++ = LSWAP(numBranchdata);
+  *dma_dabufp++ = LSWAP(lenb);
+  *dma_dabufp++ = LSWAP(ii);
+#endif
 
-  if (ii<DS_TIMEOUT) {
+
+  if (ii<DS_TIMEOUT && readout_fastbus) {
+
+
       fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
-      if (topAdc >= 0) fpbr(topAdc,2000); 
-      *(rol->dabufp)++ = 0xda000022; 
-      if (topTdc >= 0) fpbr(topTdc,2000); 
-      *(rol->dabufp)++ = ii;
-      *(rol->dabufp)++ = 0xda000033;
+      if (topAdc >= 0) {
+#ifdef VXWORKS
+	fpbr(topAdc,lenb);
+        *(rol->dabufp)++ = 0xda000022; 
+#endif
+#ifdef LINUX
+        res = fb_frdb_1(topAdc,0,dmaptr,lenb,&rb,1,1,1,0,0x0a,1,1,1);      
+        *dma_dabufp++ = LSWAP(0xda000022); 
+#endif
+      }
+      if (topTdc >= 0) {
+#ifdef VXWORKS
+	fpbr(topTdc,lenb);
+        *(rol->dabufp)++ = ii;
+        *(rol->dabufp)++ = 0xda000033;
+#endif
+#ifdef LINUX
+        res = fb_frdb_1(topTdc,0,dmaptr,lenb,&rb,1,1,1,0,0x0a,1,1,1);      
+        *dma_dabufp++ = LSWAP(ii);
+        *dma_dabufp++ = LSWAP(0xda000033);
+#endif
+      }
 
   } else {
 
+
+
+#ifdef VXWORKS
     *(rol->dabufp)++ = 0xda0000ff;
-  } 
+#endif
+#ifdef LINUX
+    *dma_dabufp++ = LSWAP(0xda0000ff);
+#endif
+  }
+
  
   datascan = 0;
   fbres = fb_frcm_1(9,0,&datascan,1,0,1,0,0,0);
-  if (fbres) logMsg("fbres = 0x%x scan_mask 0x%x datascan 0x%x\n",fbres,scan_mask,datascan,0,0,0);
+  if (fbres && verbose) logMsg("fbres = 0x%x scan_mask 0x%x datascan 0x%x\n",fbres,scan_mask,datascan,0,0,0);
   if ((datascan != 0) && (datascan&~scan_mask)) { 
         logMsg("Error: Read data but More data available after readout datascan = 0x%08x fbres = 0x%x\n",datascan,fbres,0,0,0,0);   
   }
