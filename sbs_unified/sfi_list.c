@@ -27,6 +27,10 @@ int BUFFERLEVEL=1;
 
 int branch_num=1;  
 
+/* pick multiblock(1) or not(0).  If not, then use defaultAdcCsr0 */
+static int use_multiblock=0;
+unsigned long defaultAdcCsr0=0x00000104;
+
 /* Back plane gate: 8B.  Front panel: 81    */
 unsigned long defaultAdcCsr1=0x0000008B;
 
@@ -221,9 +225,14 @@ rocPrestart()
    for (kk=0; kk<nadc; kk++) { 
      padr   = adcslots[kk];
      if (padr >= 0) {
-       csrvalue = 0x00001904;  
-       if (padr == topAdc) csrvalue = 0x00000904;
-       if (padr == bottomAdc) csrvalue = 0x00001104;
+
+       if (use_multiblock) {
+         csrvalue = 0x00001904;  
+         if (padr == topAdc) csrvalue = 0x00000904;
+         if (padr == bottomAdc) csrvalue = 0x00001104;
+       } else {
+         csrvalue = defaultAdcCsr0;
+       } 
 
        printf("ADC slot %d  %d   csr0 0x%x \n",kk,padr,csrvalue);
        fb_fwc_1(padr,0,csrvalue,1,1,0,1,0,1,1);
@@ -295,18 +304,28 @@ rocEnd()
 void
 rocTrigger(int arg)
 {
-  int ii, res, islot;
+  int ii, res, islot, rlen;
   int stat, dCnt, len=0, idata;
   int ev_type = 0;
   static int verbose=0;
+  static int flag1=1;
+  static int flag2=0;
+
   unsigned long datascan, jj, fbres, numBranchdata;
   unsigned long lenb = (((MAX_EVENT_LENGTH>>4)-2)<<2);
 
+  static int ldebug=1;
+
 #ifdef LINUX
   unsigned int *dmaptr;
+  static unsigned int *pfbdata;
   unsigned long rb;
   dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
+  pfbdata = (unsigned int *)dma_dabufp;
 #endif
+
+
+  if(ldebug) logMsg("Event Loop: DMA ptrs = 0x%x 0x%x 0x%x \n",dmaptr,dma_dabufp,pfbdata);
 
 
   EVENTOPEN(ev_type, BT_BANK);
@@ -394,7 +413,8 @@ rocTrigger(int arg)
       }
   }
 
-
+/* I wonder why *(rol->dabufp)++ works for VXWORKS but seg faults for LINUX.
+   Instead, for LINUX we must *dma_dabufp++ and also do LSWAP */
 #ifdef VXWORKS
   *(rol->dabufp)++ = 0xda000011; 
   *(rol->dabufp)++ = datascan;
@@ -417,16 +437,37 @@ rocTrigger(int arg)
 
 
       fb_fwcm_1(0x15,0,0x400,1,0,1,0,0,0);
+
+/* First read the ADCs */
+
       if (topAdc >= 0) {
 #ifdef VXWORKS
 	fpbr(topAdc,lenb);
         *(rol->dabufp)++ = 0xda000022; 
 #endif
 #ifdef LINUX
-        res = fb_frdb_1(topAdc,0,dmaptr,lenb,&rb,1,1,1,0,0x0a,1,1,1);      
+        if (use_multiblock) {
+          res = fb_frdb_1(topAdc,0,dmaptr,lenb,&rb,1,1,1,0,0x0a,1,1,1);      
+	} else {  /* read ADCs from each slot, the old slow way */
+          for (islot=bottomAdc; islot<=topAdc; islot++) {
+            if(ldebug) logMsg("Adc read loop, islot %d \n",islot);
+	    if(flag1) res = fb_frdb_1(islot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
+            rlen = rb>>2;
+            if(ldebug) logMsg("Adc rlen %d  %d \n",rb,rlen);
+            if (rlen < 0 || rlen > MAX_EVENT_LENGTH) rlen=MAX_EVENT_LENGTH;
+            for(ii=0;ii<rlen;ii++) {
+	      if(flag2) *dma_dabufp++ = LSWAP(pfbdata[ii]);
+	    }
+	  }
+	}
+
         *dma_dabufp++ = LSWAP(0xda000022); 
 #endif
       }
+
+/* ----------------------------------------- */
+/* Now read the TDCs */
+
       if (topTdc >= 0) {
 #ifdef VXWORKS
 	fpbr(topTdc,lenb);
@@ -434,7 +475,20 @@ rocTrigger(int arg)
         *(rol->dabufp)++ = 0xda000033;
 #endif
 #ifdef LINUX
-        res = fb_frdb_1(topTdc,0,dmaptr,lenb,&rb,1,1,1,0,0x0a,1,1,1);      
+        if (use_multiblock) {
+          res = fb_frdb_1(topTdc,0,dmaptr,lenb,&rb,1,1,1,0,0x0a,1,1,1);      
+	} else { /* read TDCs from each slot, the old slow way */
+          for (islot=bottomTdc; islot<=topTdc; islot++) {
+            if(ldebug) logMsg("Tdc read loop, islot %d \n",islot);
+            res = fb_frdb_1(islot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
+            rlen = rb>>2;
+            if(ldebug) logMsg("Tdc rlen %d  %d \n",rb,rlen);
+            if (rlen < 0 || rlen > MAX_EVENT_LENGTH) rlen=MAX_EVENT_LENGTH;
+            for(ii=0;ii<rlen;ii++) {
+               *dma_dabufp++ = LSWAP(pfbdata[ii]);
+	    }
+	  }
+	}
         *dma_dabufp++ = LSWAP(ii);
         *dma_dabufp++ = LSWAP(0xda000033);
 #endif
@@ -445,10 +499,10 @@ rocTrigger(int arg)
 
 
 #ifdef VXWORKS
-    *(rol->dabufp)++ = 0xda0000ff;
+    *(rol->dabufp)++ = 0xdabb00ff;
 #endif
 #ifdef LINUX
-    *dma_dabufp++ = LSWAP(0xda0000ff);
+    *dma_dabufp++ = LSWAP(0xdabb00ff);
 #endif
   }
 
