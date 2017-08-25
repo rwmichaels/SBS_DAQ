@@ -28,7 +28,7 @@ int BUFFERLEVEL=1;
 int branch_num=1;  
 
 /* pick multiblock(1) or not(0).  If not, then use defaultAdcCsr0 */
-static int use_multiblock=0;
+static int use_multiblock=1;
 unsigned long defaultAdcCsr0=0x00000104;
 
 /* Back plane gate: 8B.  Front panel: 81    */
@@ -193,7 +193,6 @@ rocDownload()
 void
 rocPrestart()
 {
-  unsigned short iflag;
   unsigned long pedsuppress, csrvalue;
   int stat, kk;
 
@@ -308,24 +307,19 @@ rocTrigger(int arg)
   int stat, dCnt, len=0, idata;
   int ev_type = 0;
   static int verbose=0;
-  static int flag1=1;
-  static int flag2=0;
 
   unsigned long datascan, jj, fbres, numBranchdata;
   unsigned long lenb = (((MAX_EVENT_LENGTH>>4)-2)<<2);
 
-  static int ldebug=1;
+  static int ldebug=0;
 
 #ifdef LINUX
   unsigned int *dmaptr;
   static unsigned int *pfbdata;
   unsigned long rb;
-  dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
   pfbdata = (unsigned int *)dma_dabufp;
 #endif
 
-
-  if(ldebug) logMsg("Event Loop: DMA ptrs = 0x%x 0x%x 0x%x \n",dmaptr,dma_dabufp,pfbdata);
 
 
   EVENTOPEN(ev_type, BT_BANK);
@@ -446,18 +440,23 @@ rocTrigger(int arg)
         *(rol->dabufp)++ = 0xda000022; 
 #endif
 #ifdef LINUX
+        res=-1; 
         if (use_multiblock) {
-          res = fb_frdb_1(topAdc,0,dmaptr,lenb,&rb,1,1,1,0,0x0a,1,1,1);      
+          dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
+          res = fb_frdb_1(topAdc,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);      
+          rlen = rb>>2;
+          if(ldebug) logMsg("multiblock Adc rlen %d  %d  %d   dma_dabufp 0x%x \n",rb,rlen,res,dma_dabufp);
+          if(res == 0) dma_dabufp += rlen;
 	} else {  /* read ADCs from each slot, the old slow way */
           for (islot=bottomAdc; islot<=topAdc; islot++) {
             if(ldebug) logMsg("Adc read loop, islot %d \n",islot);
-	    if(flag1) res = fb_frdb_1(islot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
+            dmaptr = (unsigned int *)vmeDmaLocalToVmeAdrs((unsigned int)dma_dabufp);
+	    res = fb_frdb_1(islot,0,dmaptr,lenb,&rb,1,0,1,0,0x0a,0,0,1);
             rlen = rb>>2;
-            if(ldebug) logMsg("Adc rlen %d  %d \n",rb,rlen);
+            if(res == 0) dma_dabufp += rlen;
+            if(ldebug) logMsg("individual Adc slot %d rlen %d  %d %d dma_dabufp 0x%x \n",islot, rb,rlen,res, dma_dabufp);
             if (rlen < 0 || rlen > MAX_EVENT_LENGTH) rlen=MAX_EVENT_LENGTH;
-            for(ii=0;ii<rlen;ii++) {
-	      if(flag2) *dma_dabufp++ = LSWAP(pfbdata[ii]);
-	    }
+            for(ii=0;ii<rlen;ii++) *dma_dabufp++ = LSWAP(pfbdata[ii]);
 	  }
 	}
 
